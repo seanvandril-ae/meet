@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>Add event to your calendar</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: #fff;
+      color: #333;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    main {
+      max-width: 460px;
+      margin: 0 auto;
+      padding: 48px 28px;
+    }
+
+    h1 {
+      font-size: 44px;
+      font-weight: 400;
+      line-height: 1.15;
+      letter-spacing: -0.01em;
+      margin-bottom: 20px;
+    }
+
+    .meta {
+      font-size: 19px;
+      line-height: 1.5;
+      color: #888;
+    }
+
+    hr {
+      border: 0;
+      border-top: 1px solid #ccc;
+      margin: 24px 0 18px;
+    }
+
+    .buttons { display: flex; flex-direction: column; gap: 11px; }
+
+    .buttons a {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 55px;
+      border-radius: 6px;
+      color: #fff;
+      font-size: 19px;
+      text-decoration: none;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+      transition: transform 0.1s, filter 0.1s;
+    }
+
+    .buttons a:hover { filter: brightness(1.08); }
+    .buttons a:active { transform: scale(0.985); }
+
+    .apple      { background: #000; }
+    .google     { background: #5185ec; }
+    .office365  { background: #c75633; }
+    .outlook    { background: #ccaa4c; }
+    .outlookcom { background: #4170ba; }
+    .yahoo      { background: #560ccb; }
+
+    .error { font-size: 19px; color: #888; }
+  </style>
+</head>
+<body>
+  <main id="app">
+    <h1>Add event to your calendar</h1>
+    <p class="meta" id="title"></p>
+    <p class="meta" id="when"></p>
+    <hr>
+    <div class="buttons">
+      <a class="apple" id="apple" download="meeting.ics">Apple</a>
+      <a class="google" id="google" target="_blank" rel="noopener">Google</a>
+      <a class="office365" id="office365" target="_blank" rel="noopener">Office 365</a>
+      <a class="outlook" id="outlook" download="meeting.ics">Outlook</a>
+      <a class="outlookcom" id="outlookcom" target="_blank" rel="noopener">Outlook.com</a>
+      <a class="yahoo" id="yahoo" target="_blank" rel="noopener">Yahoo</a>
+    </div>
+  </main>
+
+  <script>
+    // URL params: t = title, s = start in UTC (YYYYMMDDTHHMMZ), d = duration in minutes, l = location (optional)
+    const DEFAULT_LOCATION = "https://zoom.us/j/1234567890";
+
+    const params = new URLSearchParams(location.search);
+    const title = params.get("t");
+    const match = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})Z$/.exec(params.get("s") || "");
+    const duration = parseInt(params.get("d") || "30", 10);
+    const place = params.get("l") || DEFAULT_LOCATION;
+
+    if (!title || !match) {
+      document.getElementById("app").innerHTML =
+        '<h1>Add event to your calendar</h1><p class="error">This invite link is incomplete. Ask the sender for a new one.</p>';
+    } else {
+      const [, y, mo, d, h, mi] = match.map(Number);
+      const start = new Date(Date.UTC(y, mo - 1, d, h, mi));
+      const end = new Date(start.getTime() + duration * 60000);
+      render(start, end);
+    }
+
+    function render(start, end) {
+      document.title = `${title} · Add to calendar`;
+      document.getElementById("title").textContent = title;
+
+      // Shown in the viewer's own time zone
+      const day = start.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric", year: "numeric" });
+      const t = (date, opts) => date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit", ...opts });
+      document.getElementById("when").textContent = `${day}, ${t(start)} – ${t(end, { timeZoneName: "short" })}`;
+
+      const compact = date => date.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");  // 20260924T230000Z
+      const iso = date => date.toISOString().replace(/\.\d{3}/, "");                          // 2026-09-24T23:00:00Z
+      const q = obj => new URLSearchParams(obj).toString();
+
+      const ics = [
+        "BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Easy-event-share//EN", "METHOD:PUBLISH",
+        "BEGIN:VEVENT",
+        `UID:${compact(start)}-${Math.random().toString(36).slice(2)}@easy-event-share`,
+        `DTSTAMP:${compact(new Date())}`,
+        `DTSTART:${compact(start)}`,
+        `DTEND:${compact(end)}`,
+        `SUMMARY:${escapeIcs(title)}`,
+        `LOCATION:${escapeIcs(place)}`,
+        `URL:${place}`,
+        "BEGIN:VALARM", "TRIGGER:-PT10M", "ACTION:DISPLAY", "DESCRIPTION:Reminder", "END:VALARM",
+        "END:VEVENT", "END:VCALENDAR"
+      ].join("\r\n");
+      const icsHref = "data:text/calendar;charset=utf-8," + encodeURIComponent(ics);
+
+      const msCompose = host => `https://${host}/calendar/0/action/compose?` + q({
+        path: "/calendar/action/compose", rru: "addevent",
+        subject: title, startdt: iso(start), enddt: iso(end), location: place, body: place
+      });
+
+      const links = {
+        apple: icsHref,
+        outlook: icsHref,
+        google: "https://calendar.google.com/calendar/render?" + q({
+          action: "TEMPLATE", text: title, dates: `${compact(start)}/${compact(end)}`, location: place, details: place
+        }),
+        office365: msCompose("outlook.office.com"),
+        outlookcom: msCompose("outlook.live.com"),
+        yahoo: "https://calendar.yahoo.com/?" + q({
+          v: "60", title: title, st: compact(start), et: compact(end), in_loc: place, desc: place
+        })
+      };
+      for (const [id, href] of Object.entries(links)) document.getElementById(id).href = href;
+    }
+
+    function escapeIcs(s) {
+      return s.replace(/\\/g, "\\\\").replace(/;/g, "\\;").replace(/,/g, "\\,").replace(/\n/g, "\\n");
+    }
+  </script>
+</body>
+</html>
